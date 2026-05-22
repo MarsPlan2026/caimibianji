@@ -1,0 +1,42 @@
+# IDE 和编辑器
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+*.sublime-project
+*.sublime-workspace
+
+# 系统文件
+Thumbs.db
+*.log
+
+# 浏览器缓存
+.cache/
+*.tmp
+
+# 依赖目录（如果将来使用 npm）
+node_modules/
+package-lock.json
+yarn.lock
+
+# 构建输出
+dist/
+build/
+*.min.js
+*.min.css
+
+# 环境变量
+.env
+.env.local
+.env.*.local
+
+# 测试覆盖率
+coverage/
+.nyc_output/
+
+# 生成的游戏文件（导出的 html）
+my_game.html
+game_*.html
+riddle_game*.html
