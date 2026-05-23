@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>⚡ 关卡可视化编辑器 & 多机制完美叠加版</title>
+    <title>⚡ 猜谜游戏编辑器 & 多机制完美叠加版</title>
     <style>
         * {
             box-sizing: border-box;
@@ -67,7 +67,6 @@
             font-size: 1rem;
             outline: none;
         }
-        /* 机制多选框样式 */
         .mechanics-grid {
             display: grid;
             grid-template-columns: 1fr 1fr;
@@ -123,11 +122,16 @@
             color: #555555;
             margin-top: 2px;
         }
+        .save-status {
+            font-size: 0.9rem;
+            color: #00aa00;
+            margin-top: 10px;
+        }
     </style>
 </head>
 <body>
-
-    <h1>😈 解谜游戏可视化编辑器 (多机制自由堆叠版)</h1>
+    
+    <h1>😈 猜谜游戏可视化编辑器 (多机制自由堆叠版)</h1>
     
     <div class="import-zone" id="drop-zone">
         <p>📂 <b>将之前生成的成品游戏 (.html) 拖到这里</b> 或者 <b>点击选择文件导入</b></p>
@@ -140,43 +144,144 @@
     </div>
 
     <button id="add-level-btn">+ 添加新关卡 (Add New Stage)</button>
+    <button id="export-json-btn">📥 导出为 JSON 配置</button>
+    <button id="import-json-btn">📤 从 JSON 导入</button>
+    <div style="display: none;" id="json-file-input">
+        <input type="file" id="json-input" accept=".json">
+    </div>
 
     <div class="action-bar">
         <h3>🚀 最终成果产出：</h3>
         <button id="generate-game-btn" style="font-size: 1.2rem; padding: 15px 30px;">一键打包并下载成品游戏 (.html)</button>
+        <div id="save-indicator" class="save-status"></div>
     </div>
 
     <script>
-        // 初始化关卡，机制现在是一个数组
-        let localLevels = [
+        // ============ 存储与初始化 ============
+        const STORAGE_KEY = 'riddle_game_editor_levels';
+
+        let localLevels = loadLevelsFromStorage() || [
             { id: 1, hint: "密码其实是{BLACK}，这关我叠了三种折磨！", answer: "BLACK", mechanics: ["custom-white", "move-input", "backward"] }
         ];
 
-        // 核心机制定义列表（特征码用于识别回导）
+        // 核心机制定义列表
         const mechanicsRegistry = [
-            { id: "custom-white", label: "【大括号精准隐形】提示词中 {} 里的字变纯白", sign: "processedHtml = rawText", init: "const hint = document.getElementById('hint'); let rawText = hint.innerText; let processedHtml = rawText.replace(/\\{([^}]+)\\}/g, \"<span style='color: #ffffff; background: transparent;'>$1</span>\"); hint.innerHTML = processedHtml;", clear: "const hint = document.getElementById('hint'); hint.innerHTML = hint.innerText.replace(/[\\{\\}]/g, '');" },
-            { id: "font-ghost", label: "【隐形墨水】输入框里的字变为纯白色（打字瞎眼）", sign: "answer-input').style.color = '#ffffff'", init: "document.getElementById('answer-input').style.color = '#ffffff';", clear: "document.getElementById('answer-input').style.color = '#000000';" },
-            { id: "move-input", label: "【瞬移输入框】鼠标一碰输入框就跑路", sign: "input.onmouseenter = () =>", init: "const input = document.getElementById('answer-input'); input.onmouseenter = () => { input.style.position = 'absolute'; input.style.left = Math.random() * 200 - 100 + 'px'; input.style.top = Math.random() * 60 - 30 + 'px'; };", clear: "const input = document.getElementById('answer-input'); input.onmouseenter = null; input.style.position = 'static';" },
-            { id: "uppercase", label: "【大写锁定】强制玩家输入的字母全部变成大写", sign: "toUpperCase()", init: "const input = document.getElementById('answer-input'); input.oninput = () => { input.value = input.value.toUpperCase(); };", clear: "document.getElementById('answer-input').oninput = null;" },
-            { id: "backward", label: "【反向恶作剧】打字时文字从后往前倒序显示", sign: "reverse().join('')", init: "const input = document.getElementById('answer-input'); input.oninput = (e) => { if (e.inputType !== 'deleteContentBackward') { input.value = input.value.split('').reverse().join(''); } };", clear: "document.getElementById('answer-input').oninput = null;" },
-            { id: "ghost", label: "【灵异干扰】每隔0.2秒自动往框里塞一个随机数", sign: "this.ghostTimer =", init: "const input = document.getElementById('answer-input'); this.ghostTimer = setInterval(() => { input.value += Math.floor(Math.random() * 10); }, 200);", clear: "clearInterval(this.ghostTimer);" },
-            { id: "mousemove", label: "【绝对静止】只要鼠标在页面晃动就清空输入框", sign: "window.onmousemove =", init: "window.onmousemove = () => { document.getElementById('answer-input').value = ''; };", clear: "window.onmousemove = null;" },
-            { id: "btn-wipe", label: "【痛击提交】鼠标一摸SUBMIT按钮就秒清输入框", sign: "submit-btn').onmouseenter =", init: "document.getElementById('submit-btn').onmouseenter = () => { document.getElementById('answer-input').value = ''; };", clear: "document.getElementById('submit-btn').onmouseenter = null;" },
-            { id: "upside-down", label: "【天翻地覆】整个页面每隔3秒颠倒旋转180度", sign: "rotate(${deg}deg)", init: "document.body.style.transition = 'transform 0.5s ease'; let deg = 0; this.rotateTimer = setInterval(() => { deg = deg === 0 ? 180 : 0; document.body.style.transform = `rotate(${deg}deg)`; }, 3000);", clear: "clearInterval(this.rotateTimer); document.body.style.transform = 'rotate(0deg)';" },
-            { id: "shrink", label: "【空间压迫】只要回答错误，输入框就会变窄一截", sign: "input.style.width =", init: "const input = document.getElementById('answer-input'); const submitBtn = document.getElementById('submit-btn'); submitBtn.onclick = () => { if(input.value !== atob(levels[currentLevelIndex].answerToken)) { input.style.width = (input.offsetWidth - 30) + 'px'; } checkAnswer(); };", clear: "document.getElementById('submit-btn').onclick = checkAnswer; document.getElementById('answer-input').style.width = '250px';" },
-            { id: "move-btn", label: "【闪避按钮】提交按钮满屏幕乱飞飞", sign: "btn.onmouseenter =", init: "const btn = document.getElementById('submit-btn'); btn.style.position = 'absolute'; btn.onmouseenter = () => { btn.style.left = Math.random() * (window.innerWidth - 100) + 'px'; btn.style.top = Math.random() * (window.innerHeight - 50) + 'px'; };", clear: "const btn = document.getElementById('submit-btn'); btn.onmouseenter = null; btn.style.position = 'static';" }
+            { 
+                id: "custom-white", 
+                label: "【大括号精准隐形】提示词中 {} 里的字变纯白", 
+                sign: "processedHtml = rawText", 
+                init: "const hint = document.getElementById('hint'); let rawText = hint.innerText; let processedHtml = rawText.replace(/\\{([^}]+)\\}/g, (match, p1) => `<span style=\"color: #ffffff;\">${p1}</span>`); hint.innerHTML = processedHtml;",
+                clear: "const hint = document.getElementById('hint'); hint.innerHTML = '';",
+            },
+            { 
+                id: "font-ghost", 
+                label: "【隐形墨水】输入框里的字变为纯白色（打字瞎眼）", 
+                sign: "answer-input').style.color = '#ffffff'", 
+                init: "const answer_input_ghost = document.getElementById('answer-input'); answer_input_ghost.style.color = '#ffffff'; answer_input_ghost.style.caretColor = '#000000';",
+                clear: "const answer_input_ghost = document.getElementById('answer-input'); answer_input_ghost.style.color = '#000000';",
+            },
+            { 
+                id: "move-input", 
+                label: "【瞬移输入框】鼠标一碰输入框就跑路", 
+                sign: "input.onmouseenter = () =>", 
+                init: "const move_input = document.getElementById('answer-input'); move_input.onmouseenter = () => { let x = Math.random() * (window.innerWidth - 250); let y = Math.random() * (window.innerHeight - 50); move_input.style.position = 'fixed'; move_input.style.left = x + 'px'; move_input.style.top = y + 'px'; };",
+                clear: "const move_input = document.getElementById('answer-input'); move_input.onmouseenter = null; move_input.style.position = 'static'; move_input.style.left = 'auto'; move_input.style.top = 'auto';",
+            },
+            { 
+                id: "uppercase", 
+                label: "【大写锁定】强制玩家输入的字母全部变成大写", 
+                sign: "toUpperCase()", 
+                init: "const upper_input = document.getElementById('answer-input'); upper_input.addEventListener('input', function() { this.value = this.value.toUpperCase(); });",
+                clear: "const upper_input = document.getElementById('answer-input'); upper_input.removeEventListener('input', null);",
+            },
+            { 
+                id: "backward", 
+                label: "【反向恶作剧】打字时文字从后往前倒序显示", 
+                sign: "reverse().join('')", 
+                init: "const backward_input = document.getElementById('answer-input'); const self_backward = {}; self_backward.handler = function(e) { if (e.inputType !== 'deleteContentBackward') { this.value = this.value.split('').reverse().join(''); } }; backward_input.addEventListener('input', self_backward.handler.bind(backward_input)); backward_input._backwardHandler = self_backward.handler;",
+                clear: "const backward_input = document.getElementById('answer-input'); if(backward_input._backwardHandler) { backward_input.removeEventListener('input', backward_input._backwardHandler); }",
+            },
+            { 
+                id: "ghost", 
+                label: "【灵异干扰】每隔0.2秒自动往框里塞一个随机数", 
+                sign: "this.ghostTimer =", 
+                init: "const ghost_input = document.getElementById('answer-input'); ghost_input.ghostTimer = setInterval(() => { ghost_input.value += Math.floor(Math.random() * 10); }, 200);",
+                clear: "const ghost_input = document.getElementById('answer-input'); if(ghost_input.ghostTimer) clearInterval(ghost_input.ghostTimer);",
+            },
+            { 
+                id: "mousemove", 
+                label: "【绝对静止】只要鼠标在页面晃动就清空输入框", 
+                sign: "window.onmousemove =", 
+                init: "window.onmousemove_riddle = () => { document.getElementById('answer-input').value = ''; }; window.addEventListener('mousemove', window.onmousemove_riddle);",
+                clear: "window.removeEventListener('mousemove', window.onmousemove_riddle);",
+            },
+            { 
+                id: "btn-wipe", 
+                label: "【痛击提交】鼠标一摸SUBMIT按钮就秒清输入框", 
+                sign: "submit-btn').onmouseenter =", 
+                init: "const submit_btn_wipe = document.getElementById('submit-btn'); submit_btn_wipe.onmouseenter = () => { document.getElementById('answer-input').value = ''; };",
+                clear: "const submit_btn_wipe = document.getElementById('submit-btn'); submit_btn_wipe.onmouseenter = null;",
+            },
+            { 
+                id: "upside-down", 
+                label: "【天翻地覆】整个页面每3秒颠倒旋转180度", 
+                sign: "rotate(${deg}deg)", 
+                init: "document.body.style.transition = 'transform 0.5s ease'; let rotation_state = 0; let rotationTimer = setInterval(() => { rotation_state = rotation_state === 0 ? 180 : 0; document.body.style.transform = `rotate(${rotation_state}deg)`; }, 3000); document.body.rotationTimer = rotationTimer;",
+                clear: "if(document.body.rotationTimer) clearInterval(document.body.rotationTimer); document.body.style.transform = 'rotate(0deg)';",
+            },
+            { 
+                id: "shrink", 
+                label: "【空间压迫】只要回答错误，输入框就会变窄一截", 
+                sign: "input.style.width =", 
+                init: "const shrink_input = document.getElementById('answer-input'); shrink_input.shrinkWidth = 250; window.addEventListener('shrink-fail', () => { shrink_input.shrinkWidth = Math.max(50, shrink_input.shrinkWidth - 30); shrink_input.style.width = shrink_input.shrinkWidth + 'px'; });",
+                clear: "const shrink_input = document.getElementById('answer-input'); shrink_input.style.width = '250px'; window.removeEventListener('shrink-fail', null);",
+            },
+            { 
+                id: "move-btn", 
+                label: "【闪避按钮】提交按钮满屏幕乱飞飞", 
+                sign: "btn.onmouseenter =", 
+                init: "const move_btn = document.getElementById('submit-btn'); move_btn.style.position = 'fixed'; move_btn.onmouseenter = () => { let x = Math.random() * (window.innerWidth - 100); let y = Math.random() * (window.innerHeight - 50); move_btn.style.left = x + 'px'; move_btn.style.top = y + 'px'; };",
+                clear: "const move_btn = document.getElementById('submit-btn'); move_btn.onmouseenter = null; move_btn.style.position = 'static'; move_btn.style.left = 'auto'; move_btn.style.top = 'auto';",
+            },
         ];
 
         const container = document.getElementById('levels-container');
 
-        // 渲染可视化界面
+        // ============ 本地存储功能 ============
+        function saveLevelsToStorage() {
+            try {
+                localStorage.setItem(STORAGE_KEY, JSON.stringify(localLevels));
+                showSaveStatus('✅ 已自动保存到浏览器');
+            } catch(e) {
+                console.warn('存储失败:', e);
+            }
+        }
+
+        function loadLevelsFromStorage() {
+            try {
+                const data = localStorage.getItem(STORAGE_KEY);
+                return data ? JSON.parse(data) : null;
+            } catch(e) {
+                console.warn('读取存储失败:', e);
+                return null;
+            }
+        }
+
+        function showSaveStatus(message) {
+            const indicator = document.getElementById('save-indicator');
+            indicator.innerText = message;
+            setTimeout(() => {
+                indicator.innerText = '';
+            }, 3000);
+        }
+
+        // ============ 渲染和编辑 ============
         function render() {
             container.innerHTML = "";
             localLevels.forEach((level, index) => {
                 const block = document.createElement('div');
                 block.className = 'level-block';
                 
-                // 动态构建复选框网格HTML
                 let checkboxesHtml = "";
                 mechanicsRegistry.forEach(mech => {
                     const isChecked = level.mechanics.includes(mech.id) ? "checked" : "";
@@ -190,19 +295,19 @@
 
                 block.innerHTML = `
                     <button class="delete-btn" onclick="deleteLevel(${index})">X 删除此关</button>
-                    <div class="level-title">STAGE 配置卡片</div>
+                    <div class="level-title">STAGE ${String(level.id).padStart(2, '0')} 配置卡片</div>
                     <div class="form-group">
                         <label>关卡显示ID:</label>
-                        <input type="text" value="${level.id}" onchange="updateLevel(${index}, 'id', this.value)">
+                        <input type="text" value="${escapeHtml(level.id)}" onchange="updateLevel(${index}, 'id', this.value)">
                     </div>
                     <div class="form-group">
                         <label>给玩家的提示信息 (Hint):</label>
-                        <input type="text" value="${level.hint}" onchange="updateLevel(${index}, 'hint', this.value)">
+                        <input type="text" value="${escapeHtml(level.hint)}" onchange="updateLevel(${index}, 'hint', this.value)">
                         <div class="syntax-tip">💡 提示：用 {} 包裹的内容在游戏里会变成纯白隐形，如：这是{隐形文本}</div>
                     </div>
                     <div class="form-group">
                         <label>真正的未加密答案 (Answer):</label>
-                        <input type="text" value="${level.answer}" onchange="updateLevel(${index}, 'answer', this.value)">
+                        <input type="text" value="${escapeHtml(level.answer)}" onchange="updateLevel(${index}, 'answer', this.value)">
                     </div>
                     <div class="form-group">
                         <label>赋予本关的折磨机制 (可勾选多个同时生效):</label>
@@ -214,30 +319,87 @@
         }
 
         function updateLevel(index, key, value) {
-            localLevels[index][key] = value;
+            if(index >= 0 && index < localLevels.length) {
+                localLevels[index][key] = value;
+                saveLevelsToStorage();
+            }
         }
 
         function toggleMechanic(levelIndex, mechId, isChecked) {
+            if(levelIndex < 0 || levelIndex >= localLevels.length) return;
             let mechs = localLevels[levelIndex].mechanics;
             if (isChecked) {
                 if (!mechs.includes(mechId)) mechs.push(mechId);
             } else {
                 localLevels[levelIndex].mechanics = mechs.filter(id => id !== mechId);
             }
+            saveLevelsToStorage();
         }
 
         function deleteLevel(index) {
-            localLevels.splice(index, 1);
-            render();
+            if(confirm('确定要删除这一关吗？')) {
+                localLevels.splice(index, 1);
+                saveLevelsToStorage();
+                render();
+            }
+        }
+
+        function escapeHtml(text) {
+            const map = {
+                '&': '&amp;',
+                '<': '&lt;',
+                '>': '&gt;',
+                '"': '&quot;',
+                "'": '&#039;'
+            };
+            return String(text).replace(/[&<>"']/g, m => map[m]);
         }
 
         document.getElementById('add-level-btn').onclick = () => {
             let nextId = localLevels.length > 0 ? parseInt(localLevels[localLevels.length - 1].id) + 1 : 1;
             localLevels.push({ id: nextId, hint: "请输入答案", answer: "PASS", mechanics: [] });
+            saveLevelsToStorage();
             render();
         };
 
-        // --- 核心逻辑 1：反向回导解析复合机制 ---
+        // ============ JSON 导入导出 ============
+        document.getElementById('export-json-btn').onclick = () => {
+            const jsonStr = JSON.stringify(localLevels, null, 2);
+            const blob = new Blob([jsonStr], { type: 'application/json' });
+            const link = document.createElement('a');
+            link.href = URL.createObjectURL(blob);
+            link.download = `riddle_game_config_${new Date().getTime()}.json`;
+            link.click();
+            showSaveStatus('📥 配置已导出为 JSON');
+        };
+
+        document.getElementById('import-json-btn').onclick = () => {
+            document.getElementById('json-input').click();
+        };
+
+        document.getElementById('json-input').onchange = (e) => {
+            if(e.target.files.length > 0) {
+                const reader = new FileReader();
+                reader.onload = function(event) {
+                    try {
+                        const data = JSON.parse(event.target.result);
+                        if(Array.isArray(data) && data.length > 0 && data[0].hasOwnProperty('id')) {
+                            localLevels = data;
+                            saveLevelsToStorage();
+                            render();
+                            alert(`✅ 成功导入 ${data.length} 个关卡配置！`);
+                        } else {
+                            alert('❌ JSON 格式错误，需要是关卡数组');
+                        }
+                    } catch(err) {
+                        alert('❌ JSON 解析失败：' + err.message);
+                    }
+                };
+                reader.readAsText(e.target.files[0]);
+            }
+        };
+
+        // ============ 反向回导解析 ============
         const fileInput = document.getElementById('file-input');
         const dropZone = document.getElementById('drop-zone');
 
@@ -258,49 +420,58 @@
                 try {
                     const match = htmlContent.match(/const\s+levels\s*=\s*\[([\s\S]*?)\]\s*;/);
                     if (!match) {
-                        alert("解析失败：格式不匹配！");
+                        alert("❌ 解析失败：格式不匹配！请确保导入的是由本编辑器生成的 .html 游戏文件");
                         return;
                     }
                     
                     const rawLevelsText = match[1];
-                    const levelBlocks = rawLevelsText.split(/\}临?\s*,\s*\{|\},\s*\{/);
+                    const levelBlocks = rawLevelsText.split(/\}\s*,\s*\{/);
                     let importedLevels = [];
                     
-                    levelBlocks.forEach(block => {
-                        let idMatch = block.match(/id:\s*(\d+)/);
-                        let hintMatch = block.match(/hint:\s*["']([\s\S]*?)["']\s*,/);
-                        let tokenMatch = block.match(/answerToken:\s*["']([\s\S]*?)["']\s*,/);
+                    levelBlocks.forEach((block, blockIndex) => {
+                        let cleanBlock = block.replace(/^[\s{]*/, '').replace(/[\s}]*$/, '');
+                        
+                        let idMatch = cleanBlock.match(/id:\s*(\d+)/);
+                        let hintMatch = cleanBlock.match(/hint:\s*["']([\s\S]*?)["']\s*,/);
+                        let tokenMatch = cleanBlock.match(/answerToken:\s*["']([\s\S]*?)["']\s*,/);
                         
                         if (idMatch && hintMatch && tokenMatch) {
-                            let id = idMatch[1];
-                            let hint = hintMatch[1];
-                            let answer = atob(tokenMatch[1].trim());
-                            
-                            // 检测多选机制：只要块代码包含对应特征码，全部塞进激活数组
-                            let activeMechs = [];
-                            mechanicsRegistry.forEach(m => {
-                                if (block.includes(m.sign)) {
-                                    activeMechs.push(m.id);
-                                }
-                            });
-                            
-                            importedLevels.push({ id, hint, answer, mechanics: activeMechs });
+                            try {
+                                let id = idMatch[1];
+                                let hint = hintMatch[1];
+                                let answer = atob(tokenMatch[1].trim());
+                                
+                                let activeMechs = [];
+                                mechanicsRegistry.forEach(m => {
+                                    if (cleanBlock.includes(m.sign)) {
+                                        activeMechs.push(m.id);
+                                    }
+                                });
+                                
+                                importedLevels.push({ id, hint, answer, mechanics: activeMechs });
+                            } catch(e) {
+                                console.warn('解析关卡失败:', e);
+                            }
                         }
                     });
 
                     if (importedLevels.length > 0) {
                         localLevels = importedLevels;
+                        saveLevelsToStorage();
                         render();
-                        alert(`🎉 还原成功！已恢复共 ${importedLevels.length} 个复合关卡。`);
+                        alert(`🎉 还原成功！已恢复共 ${importedLevels.length} 个关卡和机制配置。`);
+                    } else {
+                        alert('❌ 未能解析出任何关卡数据');
                     }
                 } catch(err) {
-                    alert("导入解析出错：" + err.message);
+                    alert("❌ 导入解析出错：" + err.message);
+                    console.error(err);
                 }
             };
             reader.readAsText(file);
         }
 
-        // --- 核心逻辑 2：多套机制代码一键打包串联 ---
+        // ============ 多套机制代码打包（核心修复！） ============
         document.getElementById('generate-game-btn').onclick = () => {
             if(localLevels.length === 0) {
                 alert("你总得先添加一关才能打包吧！");
@@ -308,25 +479,39 @@
             }
 
             let levelsArrayCode = "const levels = [\n";
-            localLevels.forEach(lvl => {
+            localLevels.forEach((lvl, idx) => {
                 let token = btoa(lvl.answer); 
                 
-                // 将用户勾选的所有机制拼接进同一个 init 和 clear 函数中
+                // 构建 init 函数
                 let combinedInit = "function() {\n";
-                let combinedClear = "function() {\n";
-                
                 lvl.mechanics.forEach(mechId => {
                     let target = mechanicsRegistry.find(m => m.id === mechId);
                     if(target) {
                         combinedInit += `                    ${target.init}\n`;
+                    }
+                });
+                combinedInit += "                }";
+                
+                // 构建 clear 函数
+                let combinedClear = "function() {\n";
+                lvl.mechanics.forEach(mechId => {
+                    let target = mechanicsRegistry.find(m => m.id === mechId);
+                    if(target) {
                         combinedClear += `                    ${target.clear}\n`;
                     }
                 });
-                
-                combinedInit += "                }";
                 combinedClear += "                }";
 
-                levelsArrayCode += `            {\n                id: ${lvl.id},\n                hint: "${lvl.hint}",\n                answerToken: "${token}",\n                init: ${combinedInit},\n                clear: ${combinedClear}\n            },\n`;
+                // 正确生成完整的关卡对象代码
+                levelsArrayCode += `            {\n`;
+                levelsArrayCode += `                id: ${lvl.id},\n`;
+                levelsArrayCode += `                hint: "${lvl.hint.replace(/"/g, '\\"')}",\n`;
+                levelsArrayCode += `                answerToken: "${token}",\n`;
+                levelsArrayCode += `                init: ${combinedInit},\n`;
+                levelsArrayCode += `                clear: ${combinedClear}\n`;
+                levelsArrayCode += `            }`;
+                if(idx < localLevels.length - 1) levelsArrayCode += ",";
+                levelsArrayCode += "\n";
             });
             levelsArrayCode += "        ];";
 
@@ -370,42 +555,61 @@
         const submitBtn = document.getElementById('submit-btn');
         const levelIndicator = document.getElementById('level-indicator');
 
+        // 反调试检测
         setInterval(function() {
-            const startTime = performance.now(); debugger; const endTime = performance.now();
-            if (endTime - startTime > 100) { loadLevel(currentLevelIndex); }
+            const startTime = performance.now(); 
+            debugger; 
+            const endTime = performance.now();
+            if (endTime - startTime > 100) { 
+                loadLevel(currentLevelIndex); 
+            }
         }, 1000);
+
+        // 禁用右键菜单
         document.oncontextmenu = function() { return false; };
+
+        // 禁用开发者工具
         window.onkeydown = function(e) {
             if (e.keyCode === 123 || (e.ctrlKey && e.shiftKey && e.keyCode === 73)) {
-                alert("安全协议锁死。"); return false;
+                alert("安全协议锁死。"); 
+                return false;
             }
         };
 
         function loadLevel(index) {
             if (index >= levels.length) {
                 hintEl.innerHTML = "恭喜，你用智慧击败了整个网页！";
-                inputEl.style.display = 'none'; submitBtn.style.display = 'none';
-                levelIndicator.innerText = "END"; return;
+                inputEl.style.display = 'none'; 
+                submitBtn.style.display = 'none';
+                levelIndicator.innerText = "END"; 
+                return;
             }
-            if (index > 0) levels[index - 1].clear();
+            if (index > 0) {
+                try { levels[index - 1].clear(); } catch(e) { console.warn('清理出错:', e); }
+            }
             const currentLevel = levels[index];
             levelIndicator.innerText = "STAGE: " + String(currentLevel.id).padStart(2, '0');
             hintEl.innerHTML = currentLevel.hint;
             inputEl.value = "";
-            currentLevel.init();
+            try { currentLevel.init(); } catch(e) { console.warn('初始化出错:', e); }
         }
 
         function checkAnswer() {
             const currentLevel = levels[currentLevelIndex];
-            if (inputEl.value === atob(currentLevel.answerToken) || inputEl.value === "SKIP") {
+            const userAnswer = inputEl.value;
+            const correctAnswer = atob(currentLevel.answerToken);
+            
+            if (userAnswer === correctAnswer || userAnswer === "SKIP") {
                 alert("ACCESS GRANTED.");
                 currentLevelIndex++;
                 loadLevel(currentLevelIndex);
             } else {
                 alert("WRONG ANSWER.");
+                window.dispatchEvent(new Event('shrink-fail'));
             }
         }
 
+        // 作者暗门
         document.getElementById('dev-door').onclick = function() {
             const target = prompt("【作者暗门】跳到第几关？");
             if (target && !isNaN(target)) {
@@ -416,6 +620,7 @@
 
         submitBtn.onclick = checkAnswer;
         inputEl.onkeydown = (e) => { if (e.key === 'Enter') checkAnswer(); };
+        
         loadLevel(currentLevelIndex);
     <\/script>
 </body>
@@ -424,11 +629,13 @@
             const blob = new Blob([finalHtmlTemplate], { type: 'text/html' });
             const link = document.createElement('a');
             link.href = URL.createObjectURL(blob);
-            link.download = 'my_game.html'; 
+            link.download = `riddle_game_${new Date().getTime()}.html`;
             link.click();
+            showSaveStatus('🎉 游戏已生成并下载！');
         };
 
         render();
+        showSaveStatus('✅ 编辑器已加载');
     </script>
 </body>
 </html>
